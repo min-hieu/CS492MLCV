@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io
 from time import time
-from tqdm import tqdm 
+from tqdm import tqdm
 
 ######## for styling ########
 from matplotlib import font_manager, rcParams
@@ -12,11 +12,11 @@ myfont = {'fontname':'Iosevka', 'fontsize':'15', 'fontweight': 'bold'}
 
 ########### Setup ###########
 dataset = scipy.io.loadmat('face.mat')
-data    = np.array(dataset['X'])     # (2576, 520) 
+data    = np.array(dataset['X'])     # (2576, 520)
 labels  = np.array(dataset['l'][0])  # (1, 520)
 
 
-test_indices  = np.concatenate((np.arange(data.shape[1]//10)*10+7, 
+test_indices  = np.concatenate((np.arange(data.shape[1]//10)*10+7,
                                (np.arange(data.shape[1]//10)*10+8)))
 train_indices = [i for i in range(data.shape[1]) if i not in test_indices]
 
@@ -28,7 +28,7 @@ test_label = labels[test_indices]
 
 def show_face(x, title=None):
     '''
-    Input: 
+    Input:
         x: (2576,) vector representing face
         title (Optional): the title of the plot
     Output:
@@ -47,7 +47,7 @@ def show_face(x, title=None):
 
 def plot_acc(acc, title=None):
     '''
-    Input: 
+    Input:
         x: (2576,) vector representing face
         title (Optional): the title of the plot
     Output:
@@ -74,8 +74,8 @@ def time_func(name, func, arg):
 
 def face_recon(i, eival, eivec):
     '''
-    Input: 
-        X: (2576, N) matrix with face vector along 
+    Input:
+        X: (2576, N) matrix with face vector along
         title (Optional): the title of the plot
     Output:
         None. Plot the given face vector
@@ -115,16 +115,16 @@ def test():
     sample = 42
     for M in tqdm(range(1, N_nonzero+1), total=N_nonzero):
         V = eivec_slow[:, -M:] # eigen space consist of top M eigen vectors
-        W = V.T @ A            # column vectors are w_n 
+        W = V.T @ A            # column vectors are w_n
 
-        # testing 
+        # testing
         test_data  = data[:, test_indices]
         test_label = labels[test_indices]
 
         acc = 0
         test_N = test_data.shape[1]
         for i, test_face in enumerate(test_data.T):
-            phi   = test_face - mean 
+            phi   = test_face - mean
             phi_w = (V.T @ phi) # project into eigenspace
             nn    = np.argmin([np.linalg.norm(p - phi_w) for p in W.T]) # index of nearest neighbor
 
@@ -167,18 +167,18 @@ def recon_error (mean, V, X):
     N   = X.shape[1] # x_n is column of X
     err = zeros_like(mean)
     for i, face in enumerate(X.T):
-        phi_w = V.T @ (face - mean) 
+        phi_w = V.T @ (face - mean)
         recon_face = reconstruct_face(mean, phi_w, V)
         err += np.linalg.norm(face - recon_face)
     return err / N
 
 def face_reg_acc (A, V, test_data, test_label, title=None):
-    W = V.T @ A            # column vectors are w_n 
+    W = V.T @ A            # column vectors are w_n
 
     acc = 0
     test_N = test_data.shape[1]
     for i, test_face in enumerate(test_data.T):
-        phi   = test_face - mean 
+        phi   = test_face - mean
         phi_w = (V.T @ phi) # project into eigenspace
         nn    = np.argmin([np.linalg.norm(p - phi_w) for p in W.T]) # index of nearest neighbor
 
@@ -216,8 +216,8 @@ def increment_pca(steps=3):
         Phi, _ = np.linalg.qr(combined_eig)
         D3, R = np.linalg.eigh(Phi @ S3 @ Phi)
         return mean3, N3, Phi@R, D3, S3
-    
-    train_subdata = [train_subdata_1, train_subdata_2, 
+
+    train_subdata = [train_subdata_1, train_subdata_2,
                      train_subdata_3, train_subdata_4]
 
     mean0, N0, V0, D0, S0 = minimal_pca(train_subdata[0])
