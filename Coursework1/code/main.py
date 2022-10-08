@@ -94,8 +94,6 @@ def train():
     print("number of non-zero eigen values fast: ", np.sum(eival_fast > 1e-8))
     print(f"eigen value are same? {(eival_slow[-416:]-eival_fast < 1e-8).all()}")
 
-    print(np.min(eivec_slow))
-    print(np.min(A @ eivec_fast))
     return mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast
 
 # mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast = train()
@@ -111,7 +109,7 @@ def reconstruct_face (mean, phi_w, V):
         face += eig * phi_w[i]
     return face
 
-N_nonzero = np.sum(eival_slow > 1e-8)
+# N_nonzero = np.sum(eival_slow > 1e-8)
 def test():
     acc_list = []
     sample = 42
@@ -150,19 +148,19 @@ def test():
 
 # split training subsets
 subset1_indices = np.concatenate((np.arange(train_data.shape[1]//8)*8+0, (np.arange(train_data.shape[1]//8)*8+1)))
-train_subdata_1  = train_data[subset1_indices]
+train_subdata_1  = train_data[:, subset1_indices]
 train_sublabel_1 = train_label[subset1_indices]
 
 subset2_indices = np.concatenate((np.arange(train_data.shape[1]//8)*8+2, (np.arange(train_data.shape[1]//8)*8+3)))
-train_subdata_2  = train_data[subset2_indices]
+train_subdata_2  = train_data[:, subset2_indices]
 train_sublabel_2 = train_label[subset2_indices]
 
-subset1_indices = np.concatenate((np.arange(train_data.shape[1]//8)*8+4, (np.arange(train_data.shape[1]//8)*8+5)))
-train_subdata_3  = train_data[subset3_indices]
+subset3_indices = np.concatenate((np.arange(train_data.shape[1]//8)*8+4, (np.arange(train_data.shape[1]//8)*8+5)))
+train_subdata_3  = train_data[:, subset3_indices]
 train_sublabel_3 = train_label[subset3_indices]
 
-subset1_indices = np.concatenate((np.arange(train_data.shape[1]//8)*8+6, (np.arange(train_data.shape[1]//8)*8+7)))
-train_subdata_4  = train_data[subset4_indices]
+subset4_indices = np.concatenate((np.arange(train_data.shape[1]//8)*8+6, (np.arange(train_data.shape[1]//8)*8+7)))
+train_subdata_4  = train_data[:, subset4_indices]
 train_sublabel_4 = train_label[subset4_indices]
 
 def recon_error (mean, V, X):
@@ -191,14 +189,48 @@ def face_reg_acc (A, V, test_data, test_label, title=None):
     print(f"{title} face recognition accuracy: {acc}")
     return acc
 
-def batch_PCA():
-    pass
+def minimal_pca(train_data):
+    mean = train_data.mean(axis=1)
+    A = (train_data.T - mean.T).T
+    N = A.shape[1]
+    S = A @ A.T / N
 
-def first_set_PCA():
-    pass
+    D, V = np.linalg.eigh(S)
+    return mean, N, V, D, S
 
-def increment_PCA():
-    pass
+def batch_pca():
+    mean, N, V, D, S = minimal_pca (train_data)
+
+def first_set_pca():
+    mean, N, V, D, S = minimal_pca (train_subdata_1)
+
+def increment_pca(steps=3):
+    assert(step >= 2)
+    # in order of mean, N, eigenvectors, eigenvalues
+    def combine_pca(mean1, N1, V1, D1, S1, mean2, N2, V2, D2, S2):
+        N3 = N1 + N2
+        mean3 = (N1*mean1 + N2*mean2) / N3
+        mean_diff = np.expand_dims(mean1 - mean2, axis=1) # mean difference
+        S3 = (N1/N3)*S1 + (N2/N3)*S2 + (N1*N2/N3)*(mean_diff @ mean_diff.T)
+        combined_eig = np.hstack((V1, V2, mean_diff))
+        Phi, _ = np.linalg.qr(combined_eig)
+        D3, R = np.linalg.eigh(Phi @ S3 @ Phi)
+        return mean3, N3, Phi@R, D3, S3
+    
+    train_subdata = [train_subdata_1, train_subdata_2, 
+                     train_subdata_3, train_subdata_4]
+
+    mean0, N0, V0, D0, S0 = minimal_pca(train_subdata[0])
+    mean1, N1, V1, D1, S1 = minimal_pca(train_subdata[1])
+    mean, N, V, D, S      = combine_pca(mean0, N0, V0, D0, S0, mean1, N1, V1, D1, S1)
+
+    for step in range(2, steps):
+        mean_, N_, V_, D_, S_ = minimal_pca(train_subdata[i])
+        mean, N, V, D, S      = combine_pca(mean, N, V, D, S, mean_, N_, V_, D_, S_)
+
+    return mean, N, V, D, S
+
+# increment_pca()
 
 #############################
 
