@@ -83,26 +83,46 @@ def face_recon(i, eival, eivec):
     M = [10, 50, 100, 200, 300, 400]
     pass
 
+def eig(M):
+    D, V = np.linalg.eigh(M)
+    '''
+    ascen_idx = D.argsort()
+    V = np.real_if_close(V[:, ascen_idx], tol=1)
+    D = D[ascen_idx]
+    '''
+    return D, V
+
 def train():
     mean = train_data.mean(axis=1)
     A = (train_data.T - mean.T).T
     N = A.shape[1]
 
-    eival_slow, eivec_slow = time_func("slow method", np.linalg.eigh, A @ A.T / N)
-    eival_fast, eivec_fast = time_func("fast method", np.linalg.eigh, A.T @ A / N)
+    eival_slow, eivec_slow = time_func("slow method", eig, (A @ A.T) / N)
+    eival_fast, eivec_fast = time_func("fast method", eig, (A.T @ A) / N)
+    eivec_fast_ = A @ eivec_fast
+    eivec_fast_ = eivec_fast_ / np.expand_dims(np.linalg.norm(eivec_fast_,axis=0), axis=0)
+
+    # fix the signs
+    eivec_slow  = eivec_slow *  (eivec_slow[0,:] / np.absolute(eivec_slow[0,:]))
+    eivec_fast_ = eivec_fast_ * (eivec_fast_[0,:] / np.absolute(eivec_fast_[0,:]))
+
     print("number of non-zero eigen values slow: ", np.sum(eival_slow > 1e-8))
     print("number of non-zero eigen values fast: ", np.sum(eival_fast > 1e-8))
     print(f"eigen value are same? {(eival_slow[-416:]-eival_fast < 1e-8).all()}")
 
-    return mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast
+    return mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast_
 
-# mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast = train()
-'''
+mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast = train()
+
+
 show_face(mean, "The Mean Face")
-for i in range(1, 4):
+for i in range(1, 7):
+    print(eivec_slow[:, -i])
+    print(eivec_fast[:, -i])
     show_face(eivec_slow[:, -i], f"{i} Eigenface (slow)")
-    show_face(A @ eivec_fast[:, -i], f"{i} Eigenface (fast)")
-'''
+    show_face(eivec_fast[:, -i], f"{i} Eigenface (fast)")
+
+
 def reconstruct_face (mean, phi_w, V):
     face = mean.copy()
     for i, eig in enumerate(V.T):
