@@ -228,13 +228,15 @@ def increment_pca(steps=3):
     assert(step >= 2)
     # in order of mean, N, eigenvectors, eigenvalues
     def combine_pca(mean1, N1, V1, D1, S1, mean2, N2, V2, D2, S2):
-        N3 = N1 + N2
-        mean3 = (N1*mean1 + N2*mean2) / N3
+        N3        = N1 + N2
+        mean3     = (N1*mean1 + N2*mean2) / N3
         mean_diff = np.expand_dims(mean1 - mean2, axis=1) # mean difference
-        S3 = (N1/N3)*S1 + (N2/N3)*S2 + (N1*N2/N3)*(mean_diff @ mean_diff.T)
+        S3        = (N1/N3)*S1 + (N2/N3)*S2 + (N1*N2/N3)*(mean_diff @ mean_diff.T)
+
         combined_eig = np.hstack((V1, V2, mean_diff))
-        Phi, _ = np.linalg.qr(combined_eig)
-        D3, R = np.linalg.eigh(Phi @ S3 @ Phi)
+        Phi, _       = np.linalg.qr(combined_eig)
+        D3, R        = np.linalg.eigh(Phi @ S3 @ Phi)
+
         return mean3, N3, Phi@R, D3, S3
     
     train_subdata = [train_subdata_1, train_subdata_2, 
@@ -250,7 +252,7 @@ def increment_pca(steps=3):
 
     return mean, N, V, D, S
 
-# increment_pca()
+increment_pca()
 
 #############################
 
