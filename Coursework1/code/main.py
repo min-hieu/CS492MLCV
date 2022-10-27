@@ -3,6 +3,11 @@ import matplotlib.pyplot as plt
 import scipy.io
 from time import time
 from tqdm import tqdm
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
+import time
 
 ######## for styling ########
 from matplotlib import font_manager, rcParams
@@ -25,6 +30,8 @@ train_label = labels[train_indices]
 
 test_data  = data[:, test_indices]
 test_label = labels[test_indices]
+
+classes = np.unique(labels)
 
 def show_face(x, title=None):
     '''
@@ -112,15 +119,15 @@ def train():
 
     return mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast_
 
-mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast = train()
+# mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast = train()
 
 
-show_face(mean, "The Mean Face")
-for i in range(1, 7):
-    print(eivec_slow[:, -i])
-    print(eivec_fast[:, -i])
-    show_face(eivec_slow[:, -i], f"{i} Eigenface (slow)")
-    show_face(eivec_fast[:, -i], f"{i} Eigenface (fast)")
+# show_face(mean, "The Mean Face")
+# for i in range(1, 7):
+#     print(eivec_slow[:, -i])
+#     print(eivec_fast[:, -i])
+#     show_face(eivec_slow[:, -i], f"{i} Eigenface (slow)")
+#     show_face(eivec_fast[:, -i], f"{i} Eigenface (fast)")
 
 
 def reconstruct_face (mean, phi_w, V):
@@ -255,7 +262,84 @@ def increment_pca(steps=3):
 #############################
 
 ############ Q3 #############
-# TODO
+def show_confusion_matrix(forest, X_test, y_test, classes):
+    y_pred_test = forest.predict(X_test)
+
+    # Get and reshape confusion matrix data
+    matrix = confusion_matrix(y_test, y_pred_test)
+    matrix = matrix.astype('float') / matrix.sum(axis=1)[:, np.newaxis]
+
+    # Build the plot
+    plt.figure(figsize=(10, 7))
+    # plt.figure()
+    sns.set(font_scale=1.4)
+    sns.heatmap(matrix, annot=True, annot_kws={'size':10},
+                cmap=plt.cm.Greens, linewidths=0.2)
+
+    # Add labels to the plot
+    tick_marks = np.arange(len(classes))
+    tick_marks2 = tick_marks + 0.5
+    plt.xticks(tick_marks, classes, rotation=25)
+    plt.yticks(tick_marks2, classes, rotation=0)
+    plt.xlabel('Predicted label')
+    plt.ylabel('True label')
+    plt.title('Confusion Matrix for Random Forest Model')
+    plt.show()
+
+def rf_classification():
+    # 1) Train random forest
+    # hyper-parameter
+    n_trees = 100
+    criterion = ['gini', 'entropy', 'log_loss'][0]
+    max_depth = None
+    random_state = 42
+    weak_learner = ['axis-aligned', 'two-pixel test'][1]
+    ############ huhu
+    ########### train_data: n_features x n_sample
+
+    start_time = time.time()
+    # prepare data
+    if weak_learner == 'two-pixel test':
+      # calculate pair-wise subtraction within a vector
+      # TODO: get rid of values in diagonal?
+      rfX_train = (np.expand_dims(train_data.T, axis=2) - train_data.T[:, None])\
+                    .reshape(train_data.T.shape[0], -1)
+      rfX_test = (np.expand_dims(test_data.T, axis=2) - test_data.T[:, None])\
+                    .reshape(test_data.T.shape[1], -1)
+    else:
+      rfX_train = train_data.T
+      rfX_test = test_data.T
+
+    rfy_train = train_label
+    rfy_test = test_label
+
+    prep_data_time = time.time() - start_time
+
+    # prepare classifier
+    rf_classifier = RandomForestClassifier(n_estimators = n_trees,
+                                           criterion = criterion,
+                                           max_depth = max_depth,
+                                           random_state = random_state)
+    # fit the classifier into data
+    rf_classifier.fit(rfX_train, rfy_train)
+
+    tree_growing_time = time.time() - prep_data_time
+
+    # 2) Testing &  Result: Performance, confusion matrix, time efficiency
+    mean_acc = rf_classifier.score(rfX_test, rfy_test)
+    show_confusion_matrix(rf_classifier, rfX_test, rfy_test, classes)
+    rfy_pred_test = rf_classifier.predict(rfX_test)
+
+    test_time = time.time() - tree_growing_time
+    print('Time:')
+    print('Prep data time: ', prep_data_time)
+    print('Tree growing (training) time: ', tree_growing_time)
+    print('Testing time: ', testing_time)
+    print('Mean accuracy: ', mean_acc)
+    print('Confusion mat: ', confusion_matrix(rfy_test, rfy_pred_test))
+
+rf_classification()
+
 #############################
 
 ############ Q4 #############
