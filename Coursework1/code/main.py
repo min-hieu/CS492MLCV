@@ -2,12 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io
 from time import time
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
-import time
+import sys
+from multiprocessing import Pool
 
 ######## for styling ########
 from matplotlib import font_manager, rcParams
@@ -73,11 +74,17 @@ def plot_acc(acc, title=None):
 #############################
 
 ############ Q1 #############
-def time_func(name, func, arg):
+def time_func(func, arg, name=None):
     start = time()
-    result = func(arg)
-    print(f"{name} took {time()-start}")
-    return result
+    if arg is None or arg is (None):
+        result = func()
+    else:
+        result = func(arg)
+    elapsed_time = time() - start
+    if name is not None:
+        print(f"{name} took {elapsed_time}")
+
+    return result, elapsed_time
 
 def face_recon(i, eival, eivec):
     '''
@@ -103,9 +110,10 @@ def train():
     mean = train_data.mean(axis=1)
     A = (train_data.T - mean.T).T
     N = A.shape[1]
+    print(f"total number of training faces: {N}")
 
-    eival_slow, eivec_slow = time_func("slow method", eig, (A @ A.T) / N)
-    eival_fast, eivec_fast = time_func("fast method", eig, (A.T @ A) / N)
+    (eival_slow, eivec_slow),_ = time_func(eig, (A @ A.T) / N, "slow method")
+    (eival_fast, eivec_fast),_ = time_func(eig, (A.T @ A) / N, "fast method")
     eivec_fast_ = A @ eivec_fast
     eivec_fast_ = eivec_fast_ / np.expand_dims(np.linalg.norm(eivec_fast_,axis=0), axis=0)
 
@@ -113,6 +121,8 @@ def train():
     eivec_slow  = eivec_slow *  (eivec_slow[0,:] / np.absolute(eivec_slow[0,:]))
     eivec_fast_ = eivec_fast_ * (eivec_fast_[0,:] / np.absolute(eivec_fast_[0,:]))
 
+    print("total number of eigen value (slow): ", len(eival_slow))
+    print("total number of eigen value (fast): ", len(eival_fast))
     print("number of non-zero eigen values slow: ", np.sum(eival_slow > 1e-8))
     print("number of non-zero eigen values fast: ", np.sum(eival_fast > 1e-8))
     print(f"eigen value are same? {(eival_slow[-416:]-eival_fast < 1e-8).all()}")
@@ -139,7 +149,10 @@ def reconstruct_face (mean, phi_w, V):
 # N_nonzero = np.sum(eival_slow > 1e-8)
 def test():
     acc_list = []
-    sample = 42
+    err_list = []
+    sample = 69
+    show_face(data.T[sample], f"sample-face")
+    show_face(data.T[sample] - mean, f"normalized-face")
     for M in tqdm(range(1, N_nonzero+1), total=N_nonzero):
         V = eivec_slow[:, -M:] # eigen space consist of top M eigen vectors
         W = V.T @ A            # column vectors are w_n
@@ -149,7 +162,9 @@ def test():
         test_label = labels[test_indices]
 
         acc = 0
+        err = 0
         test_N = test_data.shape[1]
+
         for i, test_face in enumerate(test_data.T):
             phi   = test_face - mean
             phi_w = (V.T @ phi) # project into eigenspace
@@ -158,15 +173,16 @@ def test():
             pred_label = train_label[nn]
             recon_face = reconstruct_face(mean, phi_w, V)
             if (i == sample and M % 50 == 0):
-                show_face(test_face, f"original face, M={M}")
-                show_face(phi, f"normalized face, M={M}")
-                show_face(recon_face, f"reconstucted face, M={M}")
-                show_face(train_data[:, nn], f"closest face in eigenspace, M={M}")
+                show_face(recon_face, f"recon-face-M={M}")
+                show_face(train_data[:, nn], f"NN-face-M={M}")
             acc += (pred_label == test_label[i])
+            err += np.linalg.norm(recon_face - test_face)
 
         acc_list.append(acc/test_N)
+        err_list.append(err/test_N)
 
     plot_acc(acc_list, "Accuracy vs. M")
+    plot_acc(err_list, "Reconstruction Error vs. M")
 
 # test()
 #############################
@@ -199,10 +215,11 @@ def recon_error (mean, V, X):
         err += np.linalg.norm(face - recon_face)
     return err / N
 
-def face_reg_acc (A, V, test_data, test_label, title=None):
+def face_reg_acc (mean, V, A, train_label, test_data, test_label, time, title=None):
     W = V.T @ A            # column vectors are w_n
 
     acc = 0
+    err = 0
     test_N = test_data.shape[1]
     for i, test_face in enumerate(test_data.T):
         phi   = test_face - mean
@@ -212,30 +229,38 @@ def face_reg_acc (A, V, test_data, test_label, title=None):
         pred_label = train_label[nn]
         recon_face = reconstruct_face(mean, phi_w, V)
         acc += (pred_label == test_label[i])
-    acc /= tet_N
-    print(f"{title} face recognition accuracy: {acc}")
+        err += np.linalg.norm(recon_face - test_face)
+    acc /= test_N
+    err /= test_N
+    print(f"{title} & {100*acc:5.5}\\% & {time:5.5} & {err:5.5} \\\\")
     return acc
 
-def minimal_pca(train_data):
-    mean = train_data.mean(axis=1)
-    A = (train_data.T - mean.T).T
+def minimal_pca(data):
+    mean = data.mean(axis=1)
+    A = (data.T - mean.T).T
     N = A.shape[1]
-    S = A @ A.T / N
+    S = (A @ A.T) / N
 
     D, V = np.linalg.eigh(S)
-    return mean, N, V, D, S
+    return mean, N, V, D, S, A
 
 def batch_pca():
-    mean, N, V, D, S = minimal_pca (train_data)
+    print("running batch PCA")
+    mean, N, V, D, S, A = minimal_pca (train_data)
+    return (mean, V, A, train_label)
 
 def first_set_pca():
-    mean, N, V, D, S = minimal_pca (train_subdata_1)
+    print("running first set PCA")
+    mean, N, V, D, S, A = minimal_pca (train_subdata_1)
+    return (mean, V, A, train_sublabel_1)
 
 def increment_pca(steps=3):
-    assert(step >= 2)
+    assert(steps >= 2)
+    print(f"running increment PCA with step {steps}")
     # in order of mean, N, eigenvectors, eigenvalues
-    def combine_pca(mean1, N1, V1, D1, S1, mean2, N2, V2, D2, S2):
+    def combine_pca(mean1, N1, V1, D1, S1, A1, mean2, N2, V2, D2, S2, A2):
         N3        = N1 + N2
+        A3        = np.hstack((A1, A2))
         mean3     = (N1*mean1 + N2*mean2) / N3
         mean_diff = np.expand_dims(mean1 - mean2, axis=1) # mean difference
         S3        = (N1/N3)*S1 + (N2/N3)*S2 + (N1*N2/N3)*(mean_diff @ mean_diff.T)
@@ -244,106 +269,85 @@ def increment_pca(steps=3):
         Phi, _       = np.linalg.qr(combined_eig)
         D3, R        = np.linalg.eigh(Phi @ S3 @ Phi)
 
-        return mean3, N3, Phi@R, D3, S3
+        return mean3, N3, Phi@R, D3, S3, A3
 
     train_subdata = [train_subdata_1, train_subdata_2,
                      train_subdata_3, train_subdata_4]
+    train_sublabel = [train_sublabel_1, train_sublabel_2,
+                      train_sublabel_3, train_sublabel_4]
 
-    mean0, N0, V0, D0, S0 = minimal_pca(train_subdata[0])
-    mean1, N1, V1, D1, S1 = minimal_pca(train_subdata[1])
-    mean, N, V, D, S      = combine_pca(mean0, N0, V0, D0, S0, mean1, N1, V1, D1, S1)
+    args0 = minimal_pca(train_subdata[0])
+    args1 = minimal_pca(train_subdata[1])
+    mean, N, V, D, S, A = combine_pca(*args0, *args1)
+    train_lab = np.hstack((train_sublabel[0], train_sublabel[1]))
 
-    for step in range(2, steps):
-        mean_, N_, V_, D_, S_ = minimal_pca(train_subdata[i])
-        mean, N, V, D, S      = combine_pca(mean, N, V, D, S, mean_, N_, V_, D_, S_)
+    for step in tqdm(range(2, steps)):
+        tmp_args            = minimal_pca(train_subdata[step])
+        mean, N, V, D, S, A = combine_pca(mean, N, V, D, S, A, *tmp_args)
+        train_lab           = np.hstack((train_lab, train_sublabel[step]))
 
-    return mean, N, V, D, S
+    return (mean, V, A, train_lab)
 
-increment_pca()
+def test2():
+    args_first, time_first = time_func(first_set_pca, None)
+    args_batch, time_batch = time_func(batch_pca, None)
+    args_incr2, time_incr2 = time_func(increment_pca, 2)
+    args_incr3, time_incr3 = time_func(increment_pca, 3)
+    args_incr4, time_incr4 = time_func(increment_pca, 4)
+
+    out = sys.stdout
+    
+    with open('../tables/q2.txt', 'w') as f:
+        sys.stdout = f
+        print("\\begin{table}[ht]")
+        print("\\centering")
+        print("\\begin{tabular}[t]{lrrr}")
+        print("\\hline")
+        print("& avg. accuracy($\\uparrow$) & training time($\\downarrow$) & reconstruction error\\\\")
+        print("\\hline")
+        face_reg_acc(*args_first, test_data, test_label, time_first, title="first batch")
+        face_reg_acc(*args_batch, test_data, test_label, time_batch, title="whole batch")
+        face_reg_acc(*args_incr2, test_data, test_label, time_incr2, title="increment[2]")
+        face_reg_acc(*args_incr3, test_data, test_label, time_incr3, title="increment[3]")
+        face_reg_acc(*args_incr4, test_data, test_label, time_incr4, title="increment[4]")
+        print("\\hline\\\\")
+        print("\\end{tabular}")
+        print("\\caption{Accuracy of }")
+        print("\\label{tab:eigspeed}")
+        print("\\end{table}")
+        sys.stdout = out
+
+    print("test 2 finished!")
+
+
+# test2()
 
 #############################
 
 ############ Q3 #############
-def show_confusion_matrix(forest, X_test, y_test, classes):
-    y_pred_test = forest.predict(X_test)
 
-    # Get and reshape confusion matrix data
-    matrix = confusion_matrix(y_test, y_pred_test)
-    matrix = matrix.astype('float') / matrix.sum(axis=1)[:, np.newaxis]
+def get_bags (data, n_, m):
+    D, N    = data.shape
+    bags    = np.zeros((m, D, n_))
+    idx     = np.zeros((m, n_)) 
+    for i in trange(m, desc="getting bags"):
+        idx[i]  = np.random.choice(N, size=n_) 
+        bags[i] = data[:, idx[i]]
 
-    # Build the plot
-    plt.figure(figsize=(10, 7))
-    # plt.figure()
-    sns.set(font_scale=1.4)
-    sns.heatmap(matrix, annot=True, annot_kws={'size':10},
-                cmap=plt.cm.Greens, linewidths=0.2)
+    return bags, idx
 
-    # Add labels to the plot
-    tick_marks = np.arange(len(classes))
-    tick_marks2 = tick_marks + 0.5
-    plt.xticks(tick_marks, classes, rotation=25)
-    plt.yticks(tick_marks2, classes, rotation=0)
-    plt.xlabel('Predicted label')
-    plt.ylabel('True label')
-    plt.title('Confusion Matrix for Random Forest Model')
-    plt.show()
+def ensemble (M0=5, M1=10):
+    _, _, V, D, _, A = minimal_pca (train_data)
+    nz      = D > 1e-8 # filter non-zero
+    D       = D[nz] 
+    W       = V[:, nz] # (D, N-1) eigenfaces
+    N       = W.shape[1]
+    W0      = W[:, -M0:]
+    W1      = W[:, np.random.choice(len(D)-M1, size=M1, replace=False)]
+    data    = np.hstack((W1, W0)) 
+    bags    = get_bags(data)
 
-def rf_classification():
-    # 1) Train random forest
-    # hyper-parameter
-    n_trees = 100
-    criterion = ['gini', 'entropy', 'log_loss'][0]
-    max_depth = None
-    random_state = 42
-    weak_learner = ['axis-aligned', 'two-pixel test'][1]
-    ############ huhu
-    ########### train_data: n_features x n_sample
-
-    start_time = time.time()
-    # prepare data
-    if weak_learner == 'two-pixel test':
-      # calculate pair-wise subtraction within a vector
-      # TODO: get rid of values in diagonal?
-      rfX_train = (np.expand_dims(train_data.T, axis=2) - train_data.T[:, None])\
-                    .reshape(train_data.T.shape[0], -1)
-      rfX_test = (np.expand_dims(test_data.T, axis=2) - test_data.T[:, None])\
-                    .reshape(test_data.T.shape[1], -1)
-    else:
-      rfX_train = train_data.T
-      rfX_test = test_data.T
-
-    rfy_train = train_label
-    rfy_test = test_label
-
-    prep_data_time = time.time() - start_time
-
-    # prepare classifier
-    rf_classifier = RandomForestClassifier(n_estimators = n_trees,
-                                           criterion = criterion,
-                                           max_depth = max_depth,
-                                           random_state = random_state)
-    # fit the classifier into data
-    rf_classifier.fit(rfX_train, rfy_train)
-
-    tree_growing_time = time.time() - prep_data_time
-
-    # 2) Testing &  Result: Performance, confusion matrix, time efficiency
-    mean_acc = rf_classifier.score(rfX_test, rfy_test)
-    show_confusion_matrix(rf_classifier, rfX_test, rfy_test, classes)
-    rfy_pred_test = rf_classifier.predict(rfX_test)
-
-    test_time = time.time() - tree_growing_time
-    print('Time:')
-    print('Prep data time: ', prep_data_time)
-    print('Tree growing (training) time: ', tree_growing_time)
-    print('Testing time: ', testing_time)
-    print('Mean accuracy: ', mean_acc)
-    print('Confusion mat: ', confusion_matrix(rfy_test, rfy_pred_test))
-
-rf_classification()
+test3()
 
 #############################
 
-############ Q4 #############
-# TODO
-#############################
