@@ -1,0 +1,16 @@
+\begin{table}[ht]
+\centering
+\begin{tabular}[t]{lrrr}
+\hline
+& avg. accuracy($\uparrow$) & training time($\downarrow$) & reconstruction error\\
+\hline
+first batch & 28.846\% & 1.7711 & 1.332e-11 \\
+whole batch & 64.423\% & 1.7106 & 1.3915e-11 \\
+increment[2] & 29.808\% & 8.781 & 1.5259e-11 \\
+increment[3] & 29.808\% & 21.359 & 1.5361e-11 \\
+increment[4] & 63.462\% & 24.055 & 1.4419e-11 \\
+\hline\\
+\end{tabular}
+\caption{Accuracy of }
+\label{tab:eigspeed}
+\end{table}
