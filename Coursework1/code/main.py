@@ -12,7 +12,7 @@ from multiprocessing import Pool
 
 ######## for styling ########
 from matplotlib import font_manager, rcParams
-font_manager.findSystemFonts(fontpaths="/Users/charlie/Library/Fonts/", fontext="ttf")
+font_manager.findSystemFonts(fontpaths="/Users/charlie/Library/Fonts/", fontext="ttc")
 myfont = {'fontname':'Iosevka', 'fontsize':'15', 'fontweight': 'bold'}
 #############################
 
@@ -326,6 +326,127 @@ def test2():
 
 ############ Q3 #############
 
+def self_scatter(c_data, c_mean):
+    c_data_center = c_data - c_mean.reshape((*c_mean.shape, 1))
+    return c_data_center @ c_data_center.T
+
+def get_scatter_matrices(data, label, classes):
+    m = data.mean(axis=1)
+    S_w = np.zeros((data.shape[0], data.shape[0]))
+    S_b = np.zeros((data.shape[0], data.shape[0]))
+
+    for c in tqdm(classes, desc="Getting scatter matrices"):
+        c_idx   = label == c
+        c_data  = data[:, c_idx]
+        c_mean  = c_data.mean(axis=1)
+
+        c_centered  = c_data - c_mean.reshape((*c_mean.shape, 1))
+        S_i         = c_centered  @ c_centered.T
+        S_w         += S_i
+
+        N_i         = c_data.shape[1]
+        c_diff      = c_mean - m
+        S_b         += N_i * np.outer(c_diff, c_diff)
+
+    return S_w, S_b
+
+
+def get_W_pca (M_pca, data):
+    _, _, V, D, _, A = minimal_pca (data)
+    nz      = D > 1e-8 # filter non-zero
+    return V[:, nz][:, -M_pca:] 
+
+def get_W_lda (M_lda, W_pca, S_w, S_b):
+    SW      = W_pca.T @ S_w @ W_pca
+    SB      = W_pca.T @ S_b @ W_pca
+    S       = np.linalg.inv(SW) @ SB
+    D, V    = np.linalg.eigh(S)
+    nz      = D > 1e-8 # filter non-zero
+
+    return V[:, nz][:, -M_lda:] 
+
+def mini_reg_acc (V, train, train_lab, test, test_lab, classes):
+    mean    = train.mean(axis=1)
+    A       = train - mean.reshape((train.shape[0], 1))
+    W       = V.T @ A  # column vectors are w_n
+
+    acc     = 0
+    err     = 0
+    test_N  = test.shape[1]
+
+    c       = len(classes)
+    con_mat = np.zeros((c,c))
+
+    for i, test_face in enumerate(test.T):
+        phi   = test_face - mean
+        phi_w = (V.T @ phi) # project into eigenspace
+        nn    = np.argmin([np.linalg.norm(p - phi_w) for p in W.T]) # index of nearest neighbor
+
+        pred_lab    = train_lab[nn]
+        recon_face  = reconstruct_face(mean, phi_w, V)
+
+        acc += (pred_lab == test_lab[i])
+        err += np.linalg.norm(recon_face - test_face)
+        con_mat[pred_lab-1][test_lab-1] += 1
+        
+    return acc/test_N, err/test_N, con_mat
+
+def test3 ():
+    classes     = np.unique(train_label)
+    N           = train_data.shape[1]
+    c           = len(classes)
+
+    start_s     = time()
+    S_w, S_b    = get_scatter_matrices(train_data, train_label, classes)
+    total_t_s   = start_s - time()
+
+    print("collecting statistics...")
+    size_s_w    = sys.getsizeof(S_w)
+    size_s_b    = sys.getsizeof(S_b)
+    rank_s_w    = np.linalg.matrix_rank(S_w)
+    rank_s_b    = np.linalg.matrix_rank(S_b)
+
+    M_pca_r     = np.linspace(1, N-c, num=30, dtype=int)
+    M_lda_r     = np.linspace(1, c-1, num=30, dtype=int)
+
+    total_conf  = np.zeros((c,c))
+    acc_matrix  = np.zeros((len(M_pca_r), len(M_lda_r)))
+    err_matrix  = np.zeros((len(M_pca_r), len(M_lda_r)))
+    print("DONE")
+
+    for p, M_pca in enumerate(tqdm(M_pca_r, desc="running test")):
+        for l, M_lda in enumerate(tqdm(M_lda_r, leave=False)):
+            start   = time()
+
+            W_pca   = get_W_pca(M_pca, train_data)
+            W_lda   = get_W_lda(M_lda, W_pca, S_w, S_b)
+            W       = (W_lda.T @ W_pca.T).T
+
+            total_t     = time() - start
+            size_pca    = sys.getsizeof(W_pca)
+            size_lda    = sys.getsizeof(W_lda)
+            size_total  = size_pca + size_lda
+
+            acc, err, con_mat = mini_reg_acc(W, train_data, train_label, 
+                                             test_data, test_label, classes)
+            acc_matrix[p][l] = acc
+            err_matrix[p][l] = err
+            total_conf += con_mat
+
+    np.save("./acc_matrix", acc_matrix)
+    np.save("./err_matrix", acc_matrix)
+    np.save("./total_conf", acc_matrix)
+    
+    
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    ax.contour3D(M_pca_r, M_lda_r, acc_matrix, 50, cmap='binary')
+    ax.set_xlabel('M_pca')
+    ax.set_ylabel('M_lda')
+    ax.set_zlabel('accuracy');
+
+test3()
+
 def get_bags (data, n_, m):
     D, N    = data.shape
     bags    = np.zeros((m, D, n_))
@@ -347,7 +468,6 @@ def ensemble (M0=5, M1=10):
     data    = np.hstack((W1, W0)) 
     bags    = get_bags(data)
 
-test3()
 
 #############################
 
