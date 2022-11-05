@@ -9,12 +9,24 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import sys
 from multiprocessing import Pool
+from glob import glob
+import argparse
 
 ######## for styling ########
 from matplotlib import font_manager, rcParams
 font_manager.findSystemFonts(fontpaths="/Users/charlie/Library/Fonts/", fontext="ttc")
-myfont = {'fontname':'Iosevka', 'fontsize':'15', 'fontweight': 'bold'}
+myfont      = {'fontname':'Iosevka', 'fontsize':'15', 'fontweight': 'bold'}
+mysmolfont  = {'fontname':'Iosevka', 'fontsize':'11', 'fontweight': 'regular'}
 #############################
+
+
+########### Argparse ###########
+parser  = argparse.ArgumentParser()
+
+parser.add_argument('--test', choices=["1","2","3"])
+
+args    = parser.parse_args()
+################################
 
 ########### Setup ###########
 dataset = scipy.io.loadmat('face.mat')
@@ -29,10 +41,10 @@ train_indices = [i for i in range(data.shape[1]) if i not in test_indices]
 train_data  = data[:, train_indices]
 train_label = labels[train_indices]
 
-test_data  = data[:, test_indices]
-test_label = labels[test_indices]
+test_data   = data[:, test_indices]
+test_label  = labels[test_indices]
 
-classes = np.unique(labels)
+classes     = np.unique(labels)
 
 def show_face(x, title=None):
     '''
@@ -128,16 +140,16 @@ def train():
     print(f"eigen value are same? {(eival_slow[-416:]-eival_fast < 1e-8).all()}")
 
     return mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast_
+  
+if args.test == "1":
+    mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast = train()
 
-# mean, A, eival_slow, eivec_slow, eival_fast, eivec_fast = train()
-
-
-# show_face(mean, "The Mean Face")
-# for i in range(1, 7):
-#     print(eivec_slow[:, -i])
-#     print(eivec_fast[:, -i])
-#     show_face(eivec_slow[:, -i], f"{i} Eigenface (slow)")
-#     show_face(eivec_fast[:, -i], f"{i} Eigenface (fast)")
+    show_face(mean, "The Mean Face")
+    for i in range(1, 7):
+        print(eivec_slow[:, -i])
+        print(eivec_fast[:, -i])
+        show_face(eivec_slow[:, -i], f"{i} Eigenface (slow)")
+        show_face(eivec_fast[:, -i], f"{i} Eigenface (fast)")
 
 
 def reconstruct_face (mean, phi_w, V):
@@ -146,7 +158,8 @@ def reconstruct_face (mean, phi_w, V):
         face += eig * phi_w[i]
     return face
 
-# N_nonzero = np.sum(eival_slow > 1e-8)
+if args.test == "1":
+    N_nonzero = np.sum(eival_slow > 1e-8)
 def test():
     acc_list = []
     err_list = []
@@ -184,7 +197,8 @@ def test():
     plot_acc(acc_list, "Accuracy vs. M")
     plot_acc(err_list, "Reconstruction Error vs. M")
 
-# test()
+if args.test == "1":
+    test()
 #############################
 
 ############ Q2 #############
@@ -319,8 +333,8 @@ def test2():
 
     print("test 2 finished!")
 
-
-# test2()
+if args.test == "2":
+    test2()
 
 #############################
 
@@ -387,9 +401,30 @@ def mini_reg_acc (V, train, train_lab, test, test_lab, classes):
 
         acc += (pred_lab == test_lab[i])
         err += np.linalg.norm(recon_face - test_face)
-        con_mat[pred_lab-1][test_lab-1] += 1
+        con_mat[pred_lab-1, test_lab[i]-1] += 1
         
     return acc/test_N, err/test_N, con_mat
+
+train_N     = train_data.shape[1]
+train_c     = len(np.unique(train_label))
+M_pca_r     = np.linspace(1, train_N-train_c, num=30, dtype=int) 
+M_lda_r     = np.linspace(1, train_c-1, num=30, dtype=int)
+
+def pca_lda_minimal (data, label, m_pca, m_lda):
+    classes     = np.unique(label)
+    N           = data.shape[1]
+    c           = len(classes)
+
+    S_w, S_b    = get_scatter_matrices(data, label, classes)
+    W_pca       = get_W_pca(m_pca, train_data)
+    W_lda       = get_W_lda(m_lda, W_pca, S_w, S_b)
+    W           = (W_lda.T @ W_pca.T).T
+
+    acc, err, con_mat = mini_reg_acc(W, data, label, 
+                        test_data, test_label, classes)
+
+    return acc, err, con_mat
+
 
 def test3 ():
     classes     = np.unique(train_label)
@@ -406,12 +441,11 @@ def test3 ():
     rank_s_w    = np.linalg.matrix_rank(S_w)
     rank_s_b    = np.linalg.matrix_rank(S_b)
 
-    M_pca_r     = np.linspace(1, N-c, num=30, dtype=int)
-    M_lda_r     = np.linspace(1, c-1, num=30, dtype=int)
-
     total_conf  = np.zeros((c,c))
     acc_matrix  = np.zeros((len(M_pca_r), len(M_lda_r)))
     err_matrix  = np.zeros((len(M_pca_r), len(M_lda_r)))
+    mem_matrix  = np.zeros((len(M_pca_r), len(M_lda_r)))
+    tim_matrix  = np.zeros((len(M_pca_r), len(M_lda_r)))
     print("DONE")
 
     for p, M_pca in enumerate(tqdm(M_pca_r, desc="running test")):
@@ -423,50 +457,133 @@ def test3 ():
             W       = (W_lda.T @ W_pca.T).T
 
             total_t     = time() - start
-            size_pca    = sys.getsizeof(W_pca)
-            size_lda    = sys.getsizeof(W_lda)
-            size_total  = size_pca + size_lda
+            mem_pca     = sys.getsizeof(W_pca)
+            mem_lda     = sys.getsizeof(W_lda)
+            total_m     = mem_pca + mem_lda
 
             acc, err, con_mat = mini_reg_acc(W, train_data, train_label, 
                                              test_data, test_label, classes)
+            if p % 10 == 0 and l % 10 == 0:
+                np.save(f"./conf_pca{M_pca_r[p]}_lda{M_lda_r[l]}", con_mat)
+
             acc_matrix[p][l] = acc
             err_matrix[p][l] = err
+            mem_matrix[p][l] = total_m
+            tim_matrix[p][l] = total_t
             total_conf += con_mat
 
     np.save("./acc_matrix", acc_matrix)
-    np.save("./err_matrix", acc_matrix)
-    np.save("./total_conf", acc_matrix)
+    np.save("./err_matrix", err_matrix)
+    np.save("./mem_matrix", mem_matrix)
+    np.save("./tim_matrix", tim_matrix)
+    np.save("./total_conf", total_conf)
     
+def visualize_matrix(M, fname, title, show=False, conf=False):
+    classes     = np.unique(train_label)
+    N           = train_data.shape[1]
+    c           = len(classes)
+
+    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    fig, ax = plt.subplots()
+
+    cax = ax.matshow(M, cmap='viridis')
+    if conf:
+        bounds = np.sort(np.unique(M)).astype(int)
+        print(bounds.shape)
+        bounds = np.vstack((np.array(0).reshape(1,), bounds))
+        cbar = fig.colorbar(cax, boundaries=bounds)
+        cbar.ax.set_ylabel("counts", **mysmolfont)
+        ax.set_title(title, **myfont)
+        ax.set_xlabel('real class', **mysmolfont)
+        ax.set_ylabel('predicted class', **mysmolfont)
+    else:
+        cbar = fig.colorbar(cax)
+        cbar.ax.set_ylabel(title, **mysmolfont)
+        ax.set_xlabel('M_lda', **mysmolfont)
+        ax.set_ylabel('M_pca', **mysmolfont)
+        ax.set_xticklabels(M_lda_r, **mysmolfont)
+        ax.set_yticklabels(M_pca_r, **mysmolfont)
+
+    if show:
+        plt.show()
+    plt.savefig(fname)
+
+def save_figs_test3():
+    matrix_list = ["acc", "err", "mem", "tim"]
+    title = {"acc": "accuracy (%)", 
+             "err": "reconstruction error", 
+             "mem": "total memory (bytes)", 
+             "tim": "total time (s)"}
+
+    for M in matrix_list:
+        try:
+            matrix = np.load(f"./{M}_matrix.npy")
+            fname  = f"../figures/q3/{M}_plot.png"
+            visualize_matrix(matrix, fname, title[M])
+        except Exception as e:
+            print(e)
+
+    matrix  = np.load(f"./total_conf.npy")
+    fname   = f"../figures/q3/conf_plot.png"
+    title   = "total confusion matrix"
+    visualize_matrix(matrix, fname, title=title, conf=True)
+
+    for con_mat in glob("./conf_pca*.npy"):
+        pca     = con_mat.split("_")[1][3:]
+        lda     = con_mat.split("_")[2].split(".")[0][3:]
+        matrix  = np.load(con_mat)
+        fname   = f"../figures/q3/{con_mat[2:][:-4]}_plot.png"
+        title   = f"confusion matrix pca = {pca} lda = {lda}"
+        visualize_matrix(matrix, fname, title=title, conf=True)
+
+
+
+def get_best_hyperparam(show=True):
+    acc_matrix = np.load(f"./acc_matrix.npy")
+    err_matrix = np.load(f"./err_matrix.npy")
     
-    fig = plt.figure()
-    ax = plt.axes(projection='3d')
-    ax.contour3D(M_pca_r, M_lda_r, acc_matrix, 50, cmap='binary')
-    ax.set_xlabel('M_pca')
-    ax.set_ylabel('M_lda')
-    ax.set_zlabel('accuracy');
+    score   = acc_matrix * err_matrix
+    argmax  = np.unravel_index(score.argmax(), score.shape)
 
-test3()
+    fname   = f"../figures/q3/score_plot.png"
+    title   = "score matrix"
+    visualize_matrix(score, fname, title)
+    if show:
+        print(f"score at {argmax} is {score[argmax]}")
+        print(f"M_pca is {M_pca_r[argmax[0]]}, M_lda is {M_lda_r[argmax[1]]}")
 
-def get_bags (data, n_, m):
-    D, N    = data.shape
-    bags    = np.zeros((m, D, n_))
-    idx     = np.zeros((m, n_)) 
-    for i in trange(m, desc="getting bags"):
-        idx[i]  = np.random.choice(N, size=n_) 
-        bags[i] = data[:, idx[i]]
+    return argmax
+    
 
-    return bags, idx
+# visualize_test3()
+# test3()
+# save_figs_test3()
 
-def ensemble (M0=5, M1=10):
-    _, _, V, D, _, A = minimal_pca (train_data)
-    nz      = D > 1e-8 # filter non-zero
-    D       = D[nz] 
-    W       = V[:, nz] # (D, N-1) eigenfaces
-    N       = W.shape[1]
-    W0      = W[:, -M0:]
-    W1      = W[:, np.random.choice(len(D)-M1, size=M1, replace=False)]
-    data    = np.hstack((W1, W0)) 
-    bags    = get_bags(data)
+def get_bags (data, label, classes, n, T):
+    """
+    """
+    D, N        = data.shape
+    c           = len(classes)
+    bags        = np.zeros((T, D, c*n))
+    bags_label  = np.zeros((T, c*n)) 
+    for t in trange(T, desc="getting bags"):
+        for i, cl in enumerate(classes):
+            train_class = data[:,label == cl]
+            idx_class   = np.random.choice(len(train_class), size=n)
+
+            bags[t,:,i*n:(i+1)*n]       = train_class[:, idx_class] 
+            bags_label[t,i*n:(i+1)*n]   = cl
+
+    return bags, bags_label
+
+def random_training():
+    c1  = 6
+    T   = 4
+
+    bags, bags_lab  = get_bags(train_data, train_label, classes, c1, T)
+
+    best_m_pca, best_m_lda = get_best_hyperparam()
+
 
 
 #############################
