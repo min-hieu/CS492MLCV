@@ -8,7 +8,7 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
 import sys
-from multiprocessing import Pool
+from multiprocessing import Pool, freeze_support
 from glob import glob
 import argparse
 
@@ -349,7 +349,7 @@ def get_scatter_matrices(data, label, classes):
     S_w = np.zeros((data.shape[0], data.shape[0]))
     S_b = np.zeros((data.shape[0], data.shape[0]))
 
-    for c in tqdm(classes, desc="Getting scatter matrices"):
+    for c in tqdm(classes, desc="Getting scatter matrices", leave=False):
         c_idx   = label == c
         c_data  = data[:, c_idx]
         c_mean  = c_data.mean(axis=1)
@@ -405,10 +405,14 @@ def mini_reg_acc (V, train, train_lab, test, test_lab, classes):
         
     return acc/test_N, err/test_N, con_mat
 
+
 train_N     = train_data.shape[1]
 train_c     = len(np.unique(train_label))
 M_pca_r     = np.linspace(1, train_N-train_c, num=30, dtype=int) 
 M_lda_r     = np.linspace(1, train_c-1, num=30, dtype=int)
+M_pca_r_smol    = np.linspace(1, train_N-train_c, num=5, dtype=int) 
+M_lda_r_smol    = np.linspace(1, train_c-1, num=5, dtype=int) 
+
 
 def pca_lda_minimal (data, label, m_pca, m_lda):
     classes     = np.unique(label)
@@ -420,10 +424,7 @@ def pca_lda_minimal (data, label, m_pca, m_lda):
     W_lda       = get_W_lda(m_lda, W_pca, S_w, S_b)
     W           = (W_lda.T @ W_pca.T).T
 
-    acc, err, con_mat = mini_reg_acc(W, data, label, 
-                        test_data, test_label, classes)
-
-    return acc, err, con_mat
+    return W
 
 
 def test3 ():
@@ -560,30 +561,151 @@ def get_best_hyperparam(show=True):
 # save_figs_test3()
 
 def get_bags (data, label, classes, n, T):
-    """
-    """
     D, N        = data.shape
     c           = len(classes)
     bags        = np.zeros((T, D, c*n))
     bags_label  = np.zeros((T, c*n)) 
-    for t in trange(T, desc="getting bags"):
+    for t in trange(T, desc="getting bags", leave=False):
         for i, cl in enumerate(classes):
             train_class = data[:,label == cl]
-            idx_class   = np.random.choice(len(train_class), size=n)
+            idx_class   = np.random.choice(train_class.shape[1], size=n,
+                                            replace=False)
+            # TODO: replace = True makes huge difference in error
 
             bags[t,:,i*n:(i+1)*n]       = train_class[:, idx_class] 
             bags_label[t,i*n:(i+1)*n]   = cl
 
+
     return bags, bags_label
 
-def random_training():
-    c1  = 6
-    T   = 4
+def eval_pred(pred, label, classes):
+    N       = len(pred)
+    acc     = np.sum(pred == label) / N
 
+    c       = len(classes)
+    con_mat = np.zeros((c,c))
+
+    for i in range(N):
+        con_mat[pred[i]-1, label[i]-1] += 1
+
+    return acc, con_mat
+
+def get_pred(V, train, label, test):
+    mean = train.mean(axis=1)
+    A    = train - mean.reshape((train.shape[0], 1))
+    W    = V.T @ A
+    pred = np.zeros(test.shape[1])
+
+    for i, test_face in enumerate(test.T):
+        phi     = test_face - mean
+        phi_w   = (V.T @ phi) # project into eigenspace
+        nn      = np.argmin([np.linalg.norm(p - phi_w) for p in W.T]) # index of nearest neighbor
+        pred[i] = label[nn]
+
+    return pred
+
+def fusion_vote(preds, classes):
+    T, N    = preds.shape
+    c       = len(classes)
+    preds_p = np.zeros((T, c, N)) # probability distribution
+
+    for t, p_t in enumerate(preds): # p_t as shape (N,)
+        p_t_ = (p_t-1).astype(int)
+        preds_p[t, p_t_, range(len(p_t))] += 1
+
+    preds_dist = preds_p.mean(axis=0) # (c, N) 
+    # column of preds_dist is p(y|x)
+
+    return preds_dist.argmax(axis=0) + 1
+
+# c1=8 T=4 pca=100 lda=40 give 66%
+def ensemble_random_data(c1=8, T=4, m_pca=100, m_lda=40, fusion='vote', pos=0):
     bags, bags_lab  = get_bags(train_data, train_label, classes, c1, T)
+    bags_pred       = np.zeros((T, len(test_label)))
 
-    best_m_pca, best_m_lda = get_best_hyperparam()
+    for i in trange(T, desc="running ensemble", leave=False, position=pos):
+        W               = pca_lda_minimal(bags[i], bags_lab[i], m_pca, m_lda)
+        bags_pred[i]    = get_pred(W, bags[i], bags_lab[i], test_data)
 
+    if fusion == 'sum':
+        pred = fusion_sum(bags_pred)
+    elif fusion == 'vote':
+        pred = fusion_vote(bags_pred, classes)
+    else:
+        raise Exception
+
+    return eval_pred(pred, test_label, classes)
+
+acc_matrix_en = np.zeros((6,6,5,5))
+
+def tune_ensemble_rdata(i):
+    # change m_pca, m_lda, c1, T
+    T_range     = [4,8,10,20,40,60][i:i+2]
+    c1_range    = [4,6,8,10,15,20][i:i+2]
+    
+
+    for t_i, T in enumerate(T_range):
+        for c_i, c1 in enumerate(c1_range):
+            for p, m_pca in enumerate(M_pca_r_smol):
+                for l, m_lda in enumerate(M_lda_r_smol):
+                    acc, conf = ensemble_random_data(c1,T,m_pca,m_lda,pos=i)
+                    print(f"T:{T} c1:{c1} m_pca:{pca} m_lda:{pca} acc")
+                    acc_matrix_en[t_i+2*i, c_i+2*i, p, l] = acc
+                    np.save(f"./q3/conf_T{T}_c1{c1}_pca{m_pca}_lda{m_lda}", conf)
+
+
+'''
+if __name__ == '__main__':
+    freeze_support()
+    with Pool(3) as p:
+        p.map(tune_ensemble_rdata, range(3))
+    np.save(f"./q3/acc_matrix_rd", acc_matrix_en)
+'''
+    
+
+def get_random_feature(eigspace, M1, T, fixed_V):
+    D, N    = eigspace.shape[1]
+    M0      = fixed_V.shape[1]
+    rand_Vs = np.zeros((T, D, M1+M0))
+
+    for t in range(T):
+        rand_idx    = np.random.choice(N, size=M1, replace=False)
+        rand_V      = eigspace[:, rand_idx]
+        rand_Vs[t]  = np.hstack(rand_V, fixed_V)
+
+    return rand_Vs
+
+def ensemble_random_feature(M0=14, M1=30, T=6, m_lda=40, fusion='vote', pos=0):
+    classes     = np.unique(train_label)
+    N           = data.shape[1]
+    c           = len(classes)
+
+    _, _, V, D, _, A = minimal_pca (data)
+    nz          = D > 1e-8 # filter non-zero
+    eigenspace  = V[:, nz]
+    fixed_V     = eigenspace[:, -M0:] 
+    rand_Vs     = get_random_feature(eigenspace[:, :-M0], M1, T)
+    preds       = np.zeros(train_label.shape)
+
+    S_w, S_b    = get_scatter_matrices(data, label, classes)
+    for t in trange(T, desc="random feature ensemble", position=pos):
+        W_lda       = get_W_lda(m_lda, rand_Vs[t], S_w, S_b)
+        W           = (W_lda.T @ rand_Vs[t].T).T
+        preds[i]    = get_pred(W, train_data, train_label, test_data)
+        
+    preds = fusion_vote(preds, classes)
+
+    return eval_pred(pred, test_label, classes)
+
+acc, conf = ensemble_random_feature()
+
+plt.matshow(conf)
+plt.show()
+print(acc)
+
+
+def test3_ensemble():
+    pass
 
 
 #############################
