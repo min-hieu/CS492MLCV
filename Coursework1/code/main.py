@@ -11,6 +11,7 @@ import sys
 from multiprocessing import Pool, freeze_support
 from glob import glob
 import argparse
+import os
 
 ######## for styling ########
 from matplotlib import font_manager, rcParams
@@ -702,16 +703,19 @@ def tune_ensemble_rfeat(i):
     # change m_pca, m_lda, c1, T
     T_range     = [4,8,10,20,40,60][i:i+2]
     M0_range    = [20,50,100,200,300][i:i+2]
-    M1_range    = [5,20,40,60,80,100]
+    M1_range    = [5,20,40,60,80]
     
 
     for t_i, T in enumerate(T_range):
         for m0_i, m0 in enumerate(M0_range):
             for m1_i, m1 in enumerate(M1_range):
                 for l, m_lda in enumerate(M_lda_r_smol):
+                    if (os.path.exists(f"./q3/conf_T{T}_m0{m0}_m1{m1}_lda{m_lda}_rf.npy")):
+                        print("skipped")
+                        continue
                     acc, conf = ensemble_random_feature(m0,m1,T,m_lda,pos=i)
                     acc_matrix_rf[t_i+2*i, m0_i+2*i, m1_i, l] = acc
-                    np.save(f"./q3/conf_T{T}_m0{m1}_m1{m1}_lda{m_lda}_rf", conf)
+                    np.save(f"./q3/conf_T{T}_m0{m0}_m1{m1}_lda{m_lda}_rf", conf)
                     np.save("./q3/acc_matrix_rf", acc_matrix_rf)
 
 
@@ -719,6 +723,44 @@ if __name__ == '__main__':
     freeze_support()
     with Pool(3) as p:
         p.map(tune_ensemble_rfeat, range(3))
+
+def vis_rfeat():
+    T_range     = [4,8,10,20,40,60]
+    M0_range    = [20,50,100,200,300]
+    M1_range    = [5,20,40,60,80]
+
+    acc_matrix_rf = np.load("./q3/acc_matrix_rf.npy")
+    fig, axs = plt.subplots(6, 6)
+    for t_i, t in enumerate(T_range):
+        for m0_i, m0 in enumerate(M0_range):
+            mat = acc_matrix_rf[t_i, m0_i]
+            ax = axs[t_i, m0_i]
+            ax.matshow(mat)
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+    max_acc = np.max(acc_matrix_rf)
+    print(f"maximum accuracy: {max_acc}")
+    acc_title = "../figures/q3/q3-2/acc_matrix_rf"
+    plt.savefig(acc_matrix, bbox_inches='tight')
+    plt.clf()
+
+    m1      = M1_range[-1]
+    m_lda   = 
+    fig, axs = plt.subplots(6, 6)
+    for t_i, t in enumerate(T_range):
+        for m0_i, m0 in enumerate(M0_range):
+            mat = np.load(f"./q3/conf_T{T}_m0{m0}_m1{m1}_lda{m_lda}_rf", conf)
+            mat = np.load
+            ax = axs[t_i, m0_i]
+            ax.matshow(mat)
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+
+
+    # fig.tight_layout()
+
+# vis_rfeat()
+
 
 
 def test3_ensemble():
