@@ -636,7 +636,7 @@ def ensemble_random_data(c1=8, T=4, m_pca=100, m_lda=40, fusion='vote', pos=0):
 
     return eval_pred(pred, test_label, classes)
 
-acc_matrix_en = np.zeros((6,6,5,5))
+acc_matrix_rd = np.zeros((6,6,5,5))
 
 def tune_ensemble_rdata(i):
     # change m_pca, m_lda, c1, T
@@ -651,7 +651,7 @@ def tune_ensemble_rdata(i):
                     acc, conf = ensemble_random_data(c1,T,m_pca,m_lda,pos=i)
                     print(f"T:{T} c1:{c1} m_pca:{pca} m_lda:{pca} acc")
                     acc_matrix_en[t_i+2*i, c_i+2*i, p, l] = acc
-                    np.save(f"./q3/conf_T{T}_c1{c1}_pca{m_pca}_lda{m_lda}", conf)
+                    np.save(f"./q3/conf_T{T}_c1{c1}_pca{m_pca}_lda{m_lda}_rd", conf)
 
 
 '''
@@ -664,14 +664,14 @@ if __name__ == '__main__':
     
 
 def get_random_feature(eigspace, M1, T, fixed_V):
-    D, N    = eigspace.shape[1]
+    D, N    = eigspace.shape
     M0      = fixed_V.shape[1]
     rand_Vs = np.zeros((T, D, M1+M0))
 
     for t in range(T):
         rand_idx    = np.random.choice(N, size=M1, replace=False)
         rand_V      = eigspace[:, rand_idx]
-        rand_Vs[t]  = np.hstack(rand_V, fixed_V)
+        rand_Vs[t]  = np.hstack((rand_V, fixed_V))
 
     return rand_Vs
 
@@ -684,24 +684,43 @@ def ensemble_random_feature(M0=14, M1=30, T=6, m_lda=40, fusion='vote', pos=0):
     nz          = D > 1e-8 # filter non-zero
     eigenspace  = V[:, nz]
     fixed_V     = eigenspace[:, -M0:] 
-    rand_Vs     = get_random_feature(eigenspace[:, :-M0], M1, T)
-    preds       = np.zeros(train_label.shape)
+    rand_Vs     = get_random_feature(eigenspace[:, :-M0], M1, T, fixed_V)
+    preds       = np.zeros((T, *test_label.shape))
 
-    S_w, S_b    = get_scatter_matrices(data, label, classes)
+    S_w, S_b    = get_scatter_matrices(train_data, train_label, classes)
     for t in trange(T, desc="random feature ensemble", position=pos):
         W_lda       = get_W_lda(m_lda, rand_Vs[t], S_w, S_b)
         W           = (W_lda.T @ rand_Vs[t].T).T
-        preds[i]    = get_pred(W, train_data, train_label, test_data)
+        preds[t]    = get_pred(W, train_data, train_label, test_data)
         
     preds = fusion_vote(preds, classes)
 
-    return eval_pred(pred, test_label, classes)
+    return eval_pred(preds, test_label, classes)
 
-acc, conf = ensemble_random_feature()
+acc_matrix_rd = np.zeros((6,6,5,5))
 
-plt.matshow(conf)
-plt.show()
-print(acc)
+def tune_ensemble_rfeat(i):
+    # change m_pca, m_lda, c1, T
+    T_range     = [4,8,10,20,40,60][i:i+2]
+    M1_range    = [20,50,100,200,300][i:i+2]
+    M2_range    = [5,20,40,60,80,100]
+    
+
+    for t_i, T in enumerate(T_range):
+        for m1_i, m1 in enumerate(M1_range):
+            for m2_i, m2 in enumerate(M2_range):
+                for l, m_lda in enumerate(M_lda_r_smol):
+                    acc, conf = ensemble_random_feature(m0,m1,T,m_lda,pos=i)
+                    print(f"T:{T} m0:{c0} m1:{m1} m_lda:{lda} acc")
+                    acc_matrix_rd[t_i+2*i, m1_i+2*i, m2_i, l] = acc
+                    np.save(f"./q3/conf_T{T}_m1{m1}_m2{m2}_lda{m_lda}_rf", conf)
+
+
+if __name__ == '__main__':
+    freeze_support()
+    with Pool(3) as p:
+        p.map(tune_ensemble_rdata, range(3))
+    np.save(f"./q3/acc_matrix_rf", acc_matrix_rd)
 
 
 def test3_ensemble():
