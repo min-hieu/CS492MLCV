@@ -649,9 +649,9 @@ def tune_ensemble_rdata(i):
             for p, m_pca in enumerate(M_pca_r_smol):
                 for l, m_lda in enumerate(M_lda_r_smol):
                     acc, conf = ensemble_random_data(c1,T,m_pca,m_lda,pos=i)
-                    print(f"T:{T} c1:{c1} m_pca:{pca} m_lda:{pca} acc")
-                    acc_matrix_en[t_i+2*i, c_i+2*i, p, l] = acc
+                    acc_matrix_rd[t_i+2*i, c_i+2*i, p, l] = acc
                     np.save(f"./q3/conf_T{T}_c1{c1}_pca{m_pca}_lda{m_lda}_rd", conf)
+                    np.save("./q3/acc_matrix_rd", acc_matrix_rd)
 
 
 '''
@@ -659,7 +659,6 @@ if __name__ == '__main__':
     freeze_support()
     with Pool(3) as p:
         p.map(tune_ensemble_rdata, range(3))
-    np.save(f"./q3/acc_matrix_rd", acc_matrix_en)
 '''
     
 
@@ -697,30 +696,29 @@ def ensemble_random_feature(M0=14, M1=30, T=6, m_lda=40, fusion='vote', pos=0):
 
     return eval_pred(preds, test_label, classes)
 
-acc_matrix_rd = np.zeros((6,6,5,5))
+acc_matrix_rf = np.zeros((6,6,5,5))
 
 def tune_ensemble_rfeat(i):
     # change m_pca, m_lda, c1, T
     T_range     = [4,8,10,20,40,60][i:i+2]
-    M1_range    = [20,50,100,200,300][i:i+2]
-    M2_range    = [5,20,40,60,80,100]
+    M0_range    = [20,50,100,200,300][i:i+2]
+    M1_range    = [5,20,40,60,80,100]
     
 
     for t_i, T in enumerate(T_range):
-        for m1_i, m1 in enumerate(M1_range):
-            for m2_i, m2 in enumerate(M2_range):
+        for m0_i, m0 in enumerate(M0_range):
+            for m1_i, m1 in enumerate(M1_range):
                 for l, m_lda in enumerate(M_lda_r_smol):
                     acc, conf = ensemble_random_feature(m0,m1,T,m_lda,pos=i)
-                    print(f"T:{T} m0:{c0} m1:{m1} m_lda:{lda} acc")
-                    acc_matrix_rd[t_i+2*i, m1_i+2*i, m2_i, l] = acc
-                    np.save(f"./q3/conf_T{T}_m1{m1}_m2{m2}_lda{m_lda}_rf", conf)
+                    acc_matrix_rf[t_i+2*i, m0_i+2*i, m1_i, l] = acc
+                    np.save(f"./q3/conf_T{T}_m0{m1}_m1{m1}_lda{m_lda}_rf", conf)
+                    np.save("./q3/acc_matrix_rf", acc_matrix_rf)
 
 
 if __name__ == '__main__':
     freeze_support()
     with Pool(3) as p:
-        p.map(tune_ensemble_rdata, range(3))
-    np.save(f"./q3/acc_matrix_rf", acc_matrix_rd)
+        p.map(tune_ensemble_rfeat, range(3))
 
 
 def test3_ensemble():
